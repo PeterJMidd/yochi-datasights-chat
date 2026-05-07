@@ -124,12 +124,14 @@ export async function POST(req: Request) {
               try {
                 const event = JSON.parse(data)
 
-                // When a tool_use block starts, save current text as a
-                // "thinking" segment and start fresh
-                if (
-                  event.type === "content_block_start" &&
-                  event.content_block?.type === "tool_use"
-                ) {
+                // Detect tool_use via multiple methods for MCP compat
+                const isToolUse =
+                  (event.type === "content_block_start" &&
+                    event.content_block?.type === "tool_use") ||
+                  (event.type === "content_block_delta" &&
+                    event.delta?.type === "input_json_delta")
+
+                if (isToolUse) {
                   if (currentSegment) {
                     segments.push(currentSegment)
                     currentSegment = ""
