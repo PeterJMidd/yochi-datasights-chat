@@ -48,7 +48,7 @@ export async function POST(req: Request) {
         "anthropic-beta": "mcp-client-2025-11-20",
       },
       body: JSON.stringify({
-        model: "claude-sonnet-4-20250514",
+        model: "claude-haiku-4-5",
         max_tokens: 8192,
         stream: true,
         system: SYSTEM_PROMPT,
