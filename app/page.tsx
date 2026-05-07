@@ -38,11 +38,16 @@ export default function ChatPage() {
     setInput("")
     setLoading(true)
 
+    // Use AbortController for a 2-minute client-side timeout
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 120000)
+
     try {
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ messages: newMessages }),
+        signal: controller.signal,
       })
 
       if (!response.ok) {
@@ -86,14 +91,19 @@ export default function ChatPage() {
       }
     } catch (error) {
       console.error("Chat error:", error)
+      const isTimeout =
+        error instanceof DOMException && error.name === "AbortError"
       setMessages([
         ...newMessages,
         {
           role: "assistant",
-          content: "Sorry, something went wrong. Please try again.",
+          content: isTimeout
+            ? "The query took too long. Try a simpler question or break it into steps."
+            : "Sorry, something went wrong. Please try again.",
         },
       ])
     } finally {
+      clearTimeout(timeout)
       setLoading(false)
     }
   }
