@@ -1,6 +1,34 @@
 import { auth } from "@/auth"
 import { SYSTEM_PROMPT } from "@/lib/system-prompt"
 
+let cachedToken: string | null = null
+let tokenExpiresAt = 0
+
+async function getDataSightsToken(): Promise<string> {
+  if (cachedToken && Date.now() < tokenExpiresAt) {
+    return cachedToken
+  }
+
+  const res = await fetch(process.env.DATASIGHTS_TOKEN_URL!, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "client_credentials",
+      client_id: process.env.DATASIGHTS_CLIENT_ID!,
+      client_secret: process.env.DATASIGHTS_CLIENT_SECRET!,
+    }),
+  })
+
+  if (!res.ok) {
+    throw new Error(`DataSights token error: ${res.status}`)
+  }
+
+  const data = await res.json()
+  cachedToken = data.access_token
+  tokenExpiresAt = Date.now() + (data.expires_in - 60) * 1000
+  return cachedToken!
+}
+
 export async function POST(req: Request) {
   const session = await auth()
   if (!session?.user) {
@@ -9,6 +37,7 @@ export async function POST(req: Request) {
 
   try {
     const { messages } = await req.json()
+    const mcpToken = await getDataSightsToken()
 
     const apiResponse = await fetch("https://api.anthropic.com/v1/messages?beta=true", {
       method: "POST",
@@ -31,7 +60,7 @@ export async function POST(req: Request) {
             type: "url",
             url: process.env.DATASIGHTS_MCP_URL!,
             name: "datasights",
-            authorization_token: process.env.DATASIGHTS_MCP_TOKEN!,
+            authorization_token: mcpToken,
           },
         ],
         tools: [
@@ -51,7 +80,6 @@ export async function POST(req: Request) {
 
     const response = await apiResponse.json()
 
-    // Extract text from response (may include mcp_tool_use and mcp_tool_result blocks)
     const textBlocks = (response.content || []).filter(
       (b: Record<string, unknown>) => b.type === "text"
     )
@@ -59,11 +87,9 @@ export async function POST(req: Request) {
       .map((b: Record<string, unknown>) => (b.text as string) || "")
       .join("\n")
 
-    // Stream the response as SSE
     const encoder = new TextEncoder()
     const stream = new ReadableStream({
       start(controller) {
-        // Send the full text in chunks to simulate streaming
         const words = text.split(" ")
         let i = 0
         const interval = setInterval(() => {
