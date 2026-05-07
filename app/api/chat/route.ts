@@ -79,7 +79,6 @@ export async function POST(req: Request) {
       throw new Error(`Anthropic API error: ${apiResponse.status}`)
     }
 
-    // Stream the Anthropic SSE response, extracting text deltas
     const encoder = new TextEncoder()
     const decoder = new TextDecoder()
 
@@ -92,6 +91,7 @@ export async function POST(req: Request) {
         }
 
         let buffer = ""
+        let messageCount = 0
 
         try {
           while (true) {
@@ -100,7 +100,6 @@ export async function POST(req: Request) {
 
             buffer += decoder.decode(value, { stream: true })
             const lines = buffer.split("\n")
-            // Keep the last potentially incomplete line in the buffer
             buffer = lines.pop() || ""
 
             for (const line of lines) {
@@ -111,7 +110,20 @@ export async function POST(req: Request) {
               try {
                 const event = JSON.parse(data)
 
-                // Handle content_block_delta events with text
+                // Track message boundaries — each message_start is a new
+                // turn in the MCP agentic loop
+                if (event.type === "message_start") {
+                  messageCount++
+                  // When a new message starts after tool calls, tell the
+                  // client to clear the previous "thinking" text
+                  if (messageCount > 1) {
+                    controller.enqueue(
+                      encoder.encode(`data: ${JSON.stringify({ clear: true })}\n\n`)
+                    )
+                  }
+                }
+
+                // Forward text deltas to the client
                 if (
                   event.type === "content_block_delta" &&
                   event.delta?.type === "text_delta" &&
@@ -123,10 +135,6 @@ export async function POST(req: Request) {
                     )
                   )
                 }
-
-                // Don't send [DONE] on message_stop - with MCP, the stream
-                // continues with tool calls and additional messages.
-                // [DONE] is only sent when the stream truly ends (reader done).
               } catch {
                 // Skip malformed JSON chunks
               }
@@ -156,7 +164,6 @@ export async function POST(req: Request) {
             }
           }
 
-          // Ensure we always send DONE
           controller.enqueue(encoder.encode("data: [DONE]\n\n"))
           controller.close()
         } catch (error) {
