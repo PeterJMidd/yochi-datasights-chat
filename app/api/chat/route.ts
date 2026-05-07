@@ -91,7 +91,10 @@ export async function POST(req: Request) {
         }
 
         let buffer = ""
-        let messageCount = 0
+        // Track whether we've seen any tool_use blocks.
+        // Text after tool calls = the final answer.
+        let hasSeenToolUse = false
+        let lastClearSentAfterToolUse = false
 
         try {
           while (true) {
@@ -110,17 +113,29 @@ export async function POST(req: Request) {
               try {
                 const event = JSON.parse(data)
 
-                // Track message boundaries — each message_start is a new
-                // turn in the MCP agentic loop
-                if (event.type === "message_start") {
-                  messageCount++
-                  // When a new message starts after tool calls, tell the
-                  // client to clear the previous "thinking" text
-                  if (messageCount > 1) {
-                    controller.enqueue(
-                      encoder.encode(`data: ${JSON.stringify({ clear: true })}\n\n`)
+                // Detect tool_use content blocks
+                if (
+                  event.type === "content_block_start" &&
+                  event.content_block?.type === "tool_use"
+                ) {
+                  hasSeenToolUse = true
+                  lastClearSentAfterToolUse = false
+                }
+
+                // When a new text block starts after tool use, send clear
+                // so the client replaces thinking text with the answer
+                if (
+                  event.type === "content_block_start" &&
+                  event.content_block?.type === "text" &&
+                  hasSeenToolUse &&
+                  !lastClearSentAfterToolUse
+                ) {
+                  lastClearSentAfterToolUse = true
+                  controller.enqueue(
+                    encoder.encode(
+                      `data: ${JSON.stringify({ clear: true })}\n\n`
                     )
-                  }
+                  )
                 }
 
                 // Forward text deltas to the client
