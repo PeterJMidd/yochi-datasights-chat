@@ -124,10 +124,9 @@ export async function POST(req: Request) {
                   )
                 }
 
-                // Handle message_stop to signal completion
-                if (event.type === "message_stop") {
-                  controller.enqueue(encoder.encode("data: [DONE]\n\n"))
-                }
+                // Don't send [DONE] on message_stop - with MCP, the stream
+                // continues with tool calls and additional messages.
+                // [DONE] is only sent when the stream truly ends (reader done).
               } catch {
                 // Skip malformed JSON chunks
               }
