@@ -71,11 +71,6 @@ export default function ChatPage() {
 
             try {
               const parsed = JSON.parse(data)
-              // When MCP tool calls complete, the server sends a clear
-              // signal so we replace the "thinking" text with the answer
-              if (parsed.clear) {
-                assistantContent = ""
-              }
               if (parsed.text) {
                 assistantContent += parsed.text
                 setMessages([

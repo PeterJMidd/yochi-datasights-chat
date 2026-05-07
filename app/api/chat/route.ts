@@ -91,10 +91,21 @@ export async function POST(req: Request) {
         }
 
         let buffer = ""
-        // Track whether we've seen any tool_use blocks.
-        // Text after tool calls = the final answer.
+        // Collect text segments between tool calls. Each time we see a
+        // tool_use block, the preceding text is "thinking". The text after
+        // the LAST tool call is the final answer.
+        let segments: string[] = []
+        let currentSegment = ""
         let hasSeenToolUse = false
-        let lastClearSentAfterToolUse = false
+
+        // Send a keepalive comment every few seconds so the connection stays open
+        const keepalive = setInterval(() => {
+          try {
+            controller.enqueue(encoder.encode(": keepalive\n\n"))
+          } catch {
+            clearInterval(keepalive)
+          }
+        }, 5000)
 
         try {
           while (true) {
@@ -113,42 +124,26 @@ export async function POST(req: Request) {
               try {
                 const event = JSON.parse(data)
 
-                // Detect tool_use content blocks
+                // When a tool_use block starts, save current text as a
+                // "thinking" segment and start fresh
                 if (
                   event.type === "content_block_start" &&
                   event.content_block?.type === "tool_use"
                 ) {
+                  if (currentSegment) {
+                    segments.push(currentSegment)
+                    currentSegment = ""
+                  }
                   hasSeenToolUse = true
-                  lastClearSentAfterToolUse = false
                 }
 
-                // When a new text block starts after tool use, send clear
-                // so the client replaces thinking text with the answer
-                if (
-                  event.type === "content_block_start" &&
-                  event.content_block?.type === "text" &&
-                  hasSeenToolUse &&
-                  !lastClearSentAfterToolUse
-                ) {
-                  lastClearSentAfterToolUse = true
-                  controller.enqueue(
-                    encoder.encode(
-                      `data: ${JSON.stringify({ clear: true })}\n\n`
-                    )
-                  )
-                }
-
-                // Forward text deltas to the client
+                // Accumulate text deltas
                 if (
                   event.type === "content_block_delta" &&
                   event.delta?.type === "text_delta" &&
                   event.delta?.text
                 ) {
-                  controller.enqueue(
-                    encoder.encode(
-                      `data: ${JSON.stringify({ text: event.delta.text })}\n\n`
-                    )
-                  )
+                  currentSegment += event.delta.text
                 }
               } catch {
                 // Skip malformed JSON chunks
@@ -156,32 +151,36 @@ export async function POST(req: Request) {
             }
           }
 
-          // Process any remaining buffer
-          if (buffer.startsWith("data: ")) {
-            const data = buffer.slice(6).trim()
-            if (data && data !== "[DONE]") {
-              try {
-                const event = JSON.parse(data)
-                if (
-                  event.type === "content_block_delta" &&
-                  event.delta?.type === "text_delta" &&
-                  event.delta?.text
-                ) {
-                  controller.enqueue(
-                    encoder.encode(
-                      `data: ${JSON.stringify({ text: event.delta.text })}\n\n`
-                    )
-                  )
-                }
-              } catch {
-                // Skip
-              }
+          clearInterval(keepalive)
+
+          // Save the last segment
+          if (currentSegment) {
+            segments.push(currentSegment)
+          }
+
+          // If tool calls were made, only send the last segment (the answer).
+          // If no tool calls, send everything (simple response).
+          const finalText = hasSeenToolUse
+            ? segments[segments.length - 1] || ""
+            : segments.join("")
+
+          // Stream the final text word by word for a nice typing effect
+          if (finalText) {
+            const words = finalText.split(" ")
+            for (let i = 0; i < words.length; i++) {
+              const chunk = (i === 0 ? "" : " ") + words[i]
+              controller.enqueue(
+                encoder.encode(
+                  `data: ${JSON.stringify({ text: chunk })}\n\n`
+                )
+              )
             }
           }
 
           controller.enqueue(encoder.encode("data: [DONE]\n\n"))
           controller.close()
         } catch (error) {
+          clearInterval(keepalive)
           console.error("Stream processing error:", error)
           controller.error(error)
         }
