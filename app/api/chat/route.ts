@@ -39,7 +39,7 @@ export async function POST(req: Request) {
     const { messages } = await req.json()
     const mcpToken = await getDataSightsToken()
 
-    const apiResponse = await fetch("https://api.anthropic.com/v1/messages?beta=true", {
+    const apiResponse = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
