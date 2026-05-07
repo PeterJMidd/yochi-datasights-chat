@@ -50,6 +50,7 @@ export async function POST(req: Request) {
       body: JSON.stringify({
         model: "claude-sonnet-4-20250514",
         max_tokens: 8192,
+        stream: true,
         system: SYSTEM_PROMPT,
         messages: messages.map((m: { role: string; content: string }) => ({
           role: m.role,
@@ -78,33 +79,91 @@ export async function POST(req: Request) {
       throw new Error(`Anthropic API error: ${apiResponse.status}`)
     }
 
-    const response = await apiResponse.json()
-
-    const textBlocks = (response.content || []).filter(
-      (b: Record<string, unknown>) => b.type === "text"
-    )
-    const text = textBlocks
-      .map((b: Record<string, unknown>) => (b.text as string) || "")
-      .join("\n")
-
+    // Stream the Anthropic SSE response, extracting text deltas
     const encoder = new TextEncoder()
+    const decoder = new TextDecoder()
+
     const stream = new ReadableStream({
-      start(controller) {
-        const words = text.split(" ")
-        let i = 0
-        const interval = setInterval(() => {
-          if (i < words.length) {
-            const chunk = (i === 0 ? "" : " ") + words[i]
-            controller.enqueue(
-              encoder.encode(`data: ${JSON.stringify({ text: chunk })}\n\n`)
-            )
-            i++
-          } else {
-            controller.enqueue(encoder.encode("data: [DONE]\n\n"))
-            controller.close()
-            clearInterval(interval)
+      async start(controller) {
+        const reader = apiResponse.body?.getReader()
+        if (!reader) {
+          controller.close()
+          return
+        }
+
+        let buffer = ""
+
+        try {
+          while (true) {
+            const { done, value } = await reader.read()
+            if (done) break
+
+            buffer += decoder.decode(value, { stream: true })
+            const lines = buffer.split("\n")
+            // Keep the last potentially incomplete line in the buffer
+            buffer = lines.pop() || ""
+
+            for (const line of lines) {
+              if (!line.startsWith("data: ")) continue
+              const data = line.slice(6).trim()
+              if (data === "[DONE]" || !data) continue
+
+              try {
+                const event = JSON.parse(data)
+
+                // Handle content_block_delta events with text
+                if (
+                  event.type === "content_block_delta" &&
+                  event.delta?.type === "text_delta" &&
+                  event.delta?.text
+                ) {
+                  controller.enqueue(
+                    encoder.encode(
+                      `data: ${JSON.stringify({ text: event.delta.text })}\n\n`
+                    )
+                  )
+                }
+
+                // Handle message_stop to signal completion
+                if (event.type === "message_stop") {
+                  controller.enqueue(encoder.encode("data: [DONE]\n\n"))
+                }
+              } catch {
+                // Skip malformed JSON chunks
+              }
+            }
           }
-        }, 20)
+
+          // Process any remaining buffer
+          if (buffer.startsWith("data: ")) {
+            const data = buffer.slice(6).trim()
+            if (data && data !== "[DONE]") {
+              try {
+                const event = JSON.parse(data)
+                if (
+                  event.type === "content_block_delta" &&
+                  event.delta?.type === "text_delta" &&
+                  event.delta?.text
+                ) {
+                  controller.enqueue(
+                    encoder.encode(
+                      `data: ${JSON.stringify({ text: event.delta.text })}\n\n`
+                    )
+                  )
+                }
+              } catch {
+                // Skip
+              }
+            }
+          }
+
+          // Ensure we always send DONE
+          controller.enqueue(encoder.encode("data: [DONE]\n\n"))
+          controller.close()
+        } catch (error) {
+          console.error("Stream processing error:", error)
+          controller.error(error)
+        }
       },
     })
 
