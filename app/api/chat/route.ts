@@ -1,6 +1,8 @@
 import { auth } from "@/auth"
 import { SYSTEM_PROMPT } from "@/lib/system-prompt"
 
+export const maxDuration = 300
+
 let cachedToken: string | null = null
 let tokenExpiresAt = 0
 
