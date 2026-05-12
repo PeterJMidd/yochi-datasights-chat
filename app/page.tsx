@@ -38,9 +38,9 @@ export default function ChatPage() {
     setInput("")
     setLoading(true)
 
-    // Use AbortController for a 2-minute client-side timeout
+    // Use AbortController for a 5-minute client-side timeout (matches server maxDuration)
     const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), 120000)
+    const timeout = setTimeout(() => controller.abort(), 300000)
 
     try {
       const response = await fetch("/api/chat", {
