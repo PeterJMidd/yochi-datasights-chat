@@ -36,7 +36,9 @@ export async function POST(req: Request) {
   }
 
   try {
-    const { messages } = await req.json()
+    const { messages: allMessages } = await req.json()
+    // Only send last 10 messages to reduce token cost
+    const messages = allMessages.slice(-10)
     const mcpToken = await getDataSightsToken()
 
     const apiResponse = await fetch("https://api.anthropic.com/v1/messages", {
@@ -49,7 +51,7 @@ export async function POST(req: Request) {
       },
       body: JSON.stringify({
         model: "claude-sonnet-4-20250514",
-        max_tokens: 4096,
+        max_tokens: 2048,
         stream: true,
         temperature: 0,
         system: SYSTEM_PROMPT,
