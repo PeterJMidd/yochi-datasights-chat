@@ -49,25 +49,18 @@ export async function POST(req: Request) {
         "Content-Type": "application/json",
         "x-api-key": process.env.ANTHROPIC_API_KEY!,
         "anthropic-version": "2023-06-01",
-        "anthropic-beta": "mcp-client-2025-11-20,prompt-caching-2024-07-31",
+        "anthropic-beta": "mcp-client-2025-11-20",
       },
       body: JSON.stringify({
         model: "claude-sonnet-4-20250514",
         max_tokens: 2048,
         stream: true,
         temperature: 0,
-        system: [
-          {
-            type: "text",
-            text: SYSTEM_PROMPT,
-            cache_control: { type: "ephemeral" },
-          },
-        ],
+        system: SYSTEM_PROMPT,
         messages: messages.map((m: { role: string; content: string }) => ({
           role: m.role,
           content: m.content,
         })),
-        tool_choice: { type: "auto", disable_parallel_tool_use: true },
         mcp_servers: [
           {
             type: "url",
