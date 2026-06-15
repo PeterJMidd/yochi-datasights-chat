@@ -43,7 +43,7 @@ export default function ChatPage() {
     contentRef.current = ""
 
     const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), 300000)
+    const timeout = setTimeout(() => controller.abort(), 120000)
 
     try {
       setStatus("Querying database...")
@@ -64,13 +64,18 @@ export default function ChatPage() {
 
       const decoder = new TextDecoder()
       setMessages([...newMessages, { role: "assistant", content: "" }])
-      setStatus("Reading response...")
+      setStatus("Querying database — this can take up to 60s...")
 
       let lastRender = 0
       const RENDER_INTERVAL = 100
+      const READ_TIMEOUT = 60000
 
       while (true) {
-        const { done, value } = await reader.read()
+        const readPromise = reader.read()
+        const timeoutPromise = new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("No response for 60s — the query may be too complex. Try a simpler question.")), READ_TIMEOUT)
+        )
+        const { done, value } = await Promise.race([readPromise, timeoutPromise])
         if (done) break
 
         const chunk = decoder.decode(value, { stream: true })
