@@ -1,7 +1,7 @@
 "use client"
 
 import { useSession, signOut } from "next-auth/react"
-import { useState, useRef, useEffect, KeyboardEvent, FormEvent } from "react"
+import { useState, useRef, useEffect, useCallback, KeyboardEvent, FormEvent } from "react"
 
 interface Message {
   role: "user" | "assistant"
@@ -13,8 +13,10 @@ export default function ChatPage() {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState("")
   const [loading, setLoading] = useState(false)
+  const [status, setStatus] = useState("")
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const contentRef = useRef("")
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
@@ -37,12 +39,14 @@ export default function ChatPage() {
     setMessages(newMessages)
     setInput("")
     setLoading(true)
+    setStatus("Connecting...")
+    contentRef.current = ""
 
-    // Use AbortController for a 5-minute client-side timeout (matches server maxDuration)
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), 300000)
 
     try {
+      setStatus("Querying database...")
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -59,9 +63,11 @@ export default function ChatPage() {
       if (!reader) throw new Error("No response body")
 
       const decoder = new TextDecoder()
-      let assistantContent = ""
-
       setMessages([...newMessages, { role: "assistant", content: "" }])
+      setStatus("Reading response...")
+
+      let lastRender = 0
+      const RENDER_INTERVAL = 100
 
       while (true) {
         const { done, value } = await reader.read()
@@ -78,11 +84,16 @@ export default function ChatPage() {
             try {
               const parsed = JSON.parse(data)
               if (parsed.text) {
-                assistantContent += parsed.text
-                setMessages([
-                  ...newMessages,
-                  { role: "assistant", content: assistantContent },
-                ])
+                contentRef.current += parsed.text
+                const now = Date.now()
+                if (now - lastRender > RENDER_INTERVAL) {
+                  lastRender = now
+                  setStatus("")
+                  setMessages([
+                    ...newMessages,
+                    { role: "assistant", content: contentRef.current },
+                  ])
+                }
               }
             } catch {
               // Skip malformed JSON
@@ -90,6 +101,11 @@ export default function ChatPage() {
           }
         }
       }
+
+      setMessages([
+        ...newMessages,
+        { role: "assistant", content: contentRef.current },
+      ])
     } catch (error) {
       console.error("Chat error:", error)
       const isTimeout =
@@ -107,6 +123,7 @@ export default function ChatPage() {
     } finally {
       clearTimeout(timeout)
       setLoading(false)
+      setStatus("")
     }
   }
 
@@ -196,9 +213,10 @@ export default function ChatPage() {
               </div>
             </div>
           ))}
-          {loading && messages[messages.length - 1]?.role === "user" && (
+          {loading && (
             <div className="message message-assistant">
               <div className="message-bubble">
+                {status && <div className="status-text">{status}</div>}
                 <div className="typing-indicator">
                   <span></span>
                   <span></span>
