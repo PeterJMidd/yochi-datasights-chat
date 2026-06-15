@@ -81,7 +81,10 @@ export async function POST(req: Request) {
     if (!apiResponse.ok) {
       const errorBody = await apiResponse.text()
       console.error("Anthropic API error:", apiResponse.status, errorBody)
-      throw new Error(`Anthropic API error: ${apiResponse.status}`)
+      return new Response(JSON.stringify({ error: `Anthropic ${apiResponse.status}: ${errorBody}` }), {
+        status: 502,
+        headers: { "Content-Type": "application/json" },
+      })
     }
 
     const encoder = new TextEncoder()

@@ -51,7 +51,8 @@ export default function ChatPage() {
       })
 
       if (!response.ok) {
-        throw new Error(`Error: ${response.status}`)
+        const errData = await response.json().catch(() => null)
+        throw new Error(errData?.error || `Error: ${response.status}`)
       }
 
       const reader = response.body?.getReader()
@@ -93,13 +94,14 @@ export default function ChatPage() {
       console.error("Chat error:", error)
       const isTimeout =
         error instanceof DOMException && error.name === "AbortError"
+      const errMsg = error instanceof Error ? error.message : "Unknown error"
       setMessages([
         ...newMessages,
         {
           role: "assistant",
           content: isTimeout
             ? "The query took too long. Try a simpler question or break it into steps."
-            : "Sorry, something went wrong. Please try again.",
+            : `Error: ${errMsg}`,
         },
       ])
     } finally {
